@@ -1422,6 +1422,35 @@ IEW::writebackInsts()
                 iewStats.consumerInst[tid]+= dependents;
             }
             iewStats.writebackCount[tid]++;
+
+            // Phase 3 (FLOP Research) — LVP IEW Verification Hook:
+            // Now that the instruction has executed and data is available,
+            // if it's a load, train the predictor. If the prediction differs
+            // from what was speculatively forwarded at Rename, trigger a squash.
+            if (lvp && inst->isLoad()) {
+                uint64_t actual = 0;
+                unsigned dataSize = inst->effSize;
+                if (inst->memData && dataSize > 0 && dataSize <= 8) {
+                    memcpy(&actual, inst->memData, dataSize);
+                }
+                bool mispredicted = lvp->update(
+                    inst->pcState().instAddr(),
+                    actual, dataSize,
+                    inst->threadNumber);
+
+                if (mispredicted) {
+                    DPRINTF(IEW,
+                        "[tid:%i] [sn:%llu] LVP MISPREDICTION at PC=%#x "
+                        "— squashing pipeline.\n",
+                        tid, inst->seqNum,
+                        inst->pcState().instAddr());
+                    // Reuse the memory-order violation squash path
+                    if (!toCommit->squash[tid] ||
+                        toCommit->squashedSeqNum[tid] > inst->seqNum) {
+                        squashDueToMemOrder(inst, tid);
+                    }
+                }
+            }
         }
     }
 }
